@@ -8,7 +8,7 @@ import 'screens/tabbar.dart';
 void main() async {
   AwesomeNotifications().initialize(
       // set the icon to null if you want to use the default app icon
-      'resource://drawable/res_app_icon',
+      'resource://drawable/notification',
       [
         NotificationChannel(
             channelKey: 'basic_channel',
