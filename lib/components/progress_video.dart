@@ -1,13 +1,15 @@
+// Dart
 import 'dart:io';
-
+// Flutter
 import 'package:flutter/material.dart';
+// Others
+import 'package:awesome_notifications/awesome_notifications.dart';
+import 'package:file_support/file_support.dart';
+import 'package:flutter_ffmpeg/flutter_ffmpeg.dart';
+import 'package:media_store/media_store.dart';
 import 'package:youtube_downloader/models/video_detail.dart';
 import 'package:youtube_downloader/styles/progress_video.dart' as style;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-import 'package:awesome_notifications/awesome_notifications.dart';
-
-import 'package:file_support/file_support.dart';
-import 'package:media_store/media_store.dart';
 
 class ProgressVideo extends StatefulWidget {
   static const double _side = 50;
@@ -39,25 +41,9 @@ class _ProgressVideoState extends State<ProgressVideo> {
     _startDownload();
   }
 
-  void _notifyDownloadError() {
-    setState(() {
-      _isThereError = true;
-      _isFinished = true;
-      AwesomeNotifications().isNotificationAllowed().then((isAllowed) {
-        if (isAllowed) {
-          AwesomeNotifications().createNotification(
-            content: NotificationContent(
-              id: _id++,
-              channelKey: 'basic_channel',
-              title: widget.videoDetail.video.title,
-              body: 'Sentimos muito :( Não foi possíve realizar o download.',
-            ),
-          );
-        }
-      });
-    });
-  }
-
+  
+  // FIXME: I should implement a new model where I can manipulate the download
+  // and callback's, but for now, due to time, I'm going to do this
   Future<void> _startDownload() async {
     /*
     // NOTE: Only for tests
@@ -67,60 +53,81 @@ class _ProgressVideoState extends State<ProgressVideo> {
     */
     var downloadPath = await FileSupport().getDownloadFolderPath();
     final container = widget.videoDetail.streamInfo.container;
-    final name = widget.videoDetail.video.title
-        .replaceAll('/', '_')
-        .replaceAll('\\', '_')
-        .replaceAll('!', '_');
-    var file = File('$downloadPath/$name.$container');
+    final input = File('$downloadPath/input.$container');
 
     try {
       var streamInfo = widget.videoDetail.streamInfo;
       var stream = widget.videoDetail.yt.videos.streamsClient.get(streamInfo);
-
       // Delete the file if exists.
-      if (file.existsSync()) {
-        file.deleteSync();
+      if (input.existsSync()) {
+        input.deleteSync();
       }
 
-      var output = file.openWrite();
+      // Download file
+      var sink = input.openWrite();
       await for (final data in stream) {
         setState(() {
           _received += data.length;
           _percent = (_received / _total.totalBytes);
-          output.add(data);
+          sink.add(data);
         });
       }
 
-      await output.close();
-      // Refresh android media and generate a new file inside Rost folder
-      await MediaStore.saveFile(file.path);
+      await sink.close();
+      if (widget.videoDetail.type == Type.music) {
+        final output = File('$downloadPath/output.mp3');
+        final flutterFFmpeg = FlutterFFmpeg();
+        final res = await flutterFFmpeg.execute("-i ${input.path} ${output.path}");
+        if (res != 0) throw Exception('Error parse mp4 to mp3');
+        await MediaStore.saveFile(output.path);
+        //await MediaFileSaver.saveFile(output.path);
+        if (await output.exists()) {
+          await output.delete();
+        }
+      } else {
+        // Refresh android media and generate a new file inside Rost folder
+        await MediaStore.saveFile(input.path);
+        //await MediaFileSaver.saveFile(input.path);
+      }
       // Delete older file
-      file.deleteSync();
+      input.deleteSync();
       _notifyDownloadDone();
     } catch (e) {
-      debugPrint('Error: $e');
-      if (file.existsSync()) {
-        file.deleteSync();
-      }
       _notifyDownloadError();
+      debugPrint('Error: $e');
+      if (await input.exists()) {
+        await input.delete();
+      }
     }
   }
 
   void _notifyDownloadDone() {
     setState(() {
       _isFinished = true;
-      AwesomeNotifications().isNotificationAllowed().then((isAllowed) {
-        if (isAllowed) {
-          AwesomeNotifications().createNotification(
-            content: NotificationContent(
-              id: _id++,
-              channelKey: 'basic_channel',
-              title: widget.videoDetail.video.title,
-              body: 'Download concluído',
-            ),
-          );
-        }
-      });
+      _notifyUser(message: 'Download concluído');
+    });
+  }
+
+  void _notifyDownloadError() {
+    setState(() {
+      _isThereError = true;
+      _isFinished = true;
+      _notifyUser(message: 'Sentimos muito :( Não foi possíve realizar o download.');
+    });
+  }
+
+  void _notifyUser({required String message}) {
+    AwesomeNotifications().isNotificationAllowed().then((isAllowed) {
+      if (isAllowed) {
+        AwesomeNotifications().createNotification(
+          content: NotificationContent(
+            id: _id++,
+            channelKey: 'basic_channel',
+            title: widget.videoDetail.video.title,
+            body: message,
+          ),
+        );
+      }
     });
   }
 
